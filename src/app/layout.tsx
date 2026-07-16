@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nakshatra WhatsApp Studio",
-  description: "WhatsApp conversations, campaigns, and automation for hospitality teams.",
+  title: "WaFlow — WhatsApp Business Dashboard",
+  description: "Manage conversations, campaigns and automated WhatsApp flows.",
 };
 
 export default function RootLayout({
@@ -27,7 +27,7 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body>{children}</body>
+      <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
 }
