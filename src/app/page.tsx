@@ -19,6 +19,7 @@ export default async function Home() {
   return (
     <Dashboard
       userEmail={typeof data.claims.email === "string" ? data.claims.email : "Administrator"}
+      userName={typeof data.claims.user_metadata === "object" && data.claims.user_metadata && "display_name" in data.claims.user_metadata && typeof data.claims.user_metadata.display_name === "string" ? data.claims.user_metadata.display_name : "Administrator"}
       workspaceName={(membership.organization as unknown as { name?: string } | null)?.name ?? "Nakshatra Hotel & Resort"}
     />
   );

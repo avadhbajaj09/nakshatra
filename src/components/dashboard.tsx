@@ -1,109 +1,74 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
-  Activity, ArrowUpRight, Bell, Bot, Check, CheckCheck, ChevronDown,
-  CircleHelp, Clock3, ContactRound, GitBranch, Inbox, LayoutDashboard,
-  Megaphone, Menu, MessageCircle, MoreHorizontal, Plus, Search, Send,
-  Settings, Sparkles, Users, Workflow, X, Zap, LogOut,
+  Activity, ArrowUpRight, CheckCheck, CircleHelp, ContactRound, GitBranch,
+  Inbox, LayoutDashboard, Loader2, LogOut, Menu, MessageCircle, Megaphone,
+  Plus, RefreshCw, Search, Users, Workflow, X,
 } from "lucide-react";
 import { LiveInbox } from "@/components/live-inbox";
 import { createClient } from "@/lib/supabase/client";
 
 type Section = "Overview" | "Inbox" | "Campaigns" | "Flows" | "Contacts";
+type Contact = { id:string; display_name:string|null; phone:string; wa_id:string; tags:string[]; created_at:string; updated_at:string };
+type Conversation = { id:string; status:string; last_message_at:string|null; whatsapp_account_id:string; contact:Contact; whatsapp_account:{ display_phone_number:string|null; verified_name:string|null } };
+type Message = { id:string; conversation_id:string; direction:"inbound"|"outbound"; message_type:string; body:string|null; status:string; sent_at:string; whatsapp_message_id:string|null };
+type WorkspaceFlow = { id:string; name:string; description:string|null; trigger_type:string; is_active:boolean; updated_at:string };
+type WorkspaceData = { conversations:Conversation[]; messages:Message[]; contacts:Contact[]; workflows:WorkspaceFlow[] };
 
-const nav: { label: Section; icon: typeof Inbox; count?: string }[] = [
-  { label: "Overview", icon: LayoutDashboard },
-  { label: "Inbox", icon: Inbox, count: "12" },
-  { label: "Campaigns", icon: Megaphone },
-  { label: "Flows", icon: GitBranch },
-  { label: "Contacts", icon: ContactRound },
+const emptyData:WorkspaceData={conversations:[],messages:[],contacts:[],workflows:[]};
+const nav:{label:Section;icon:typeof Inbox}[]=[
+  {label:"Overview",icon:LayoutDashboard},{label:"Inbox",icon:Inbox},{label:"Campaigns",icon:Megaphone},{label:"Flows",icon:GitBranch},{label:"Contacts",icon:ContactRound},
 ];
 
-const conversations = [
-  { initials: "AM", name: "Aarav Mehta", text: "Yes, please confirm my booking", time: "2m", unread: 2, color: "#f6c48d" },
-  { initials: "SK", name: "Sara Khan", text: "Thank you! That was very helpful.", time: "8m", unread: 0, color: "#b5d7c7" },
-  { initials: "RP", name: "Rohan Patel", text: "Can I change the delivery address?", time: "18m", unread: 1, color: "#a9c8ed" },
-  { initials: "NP", name: "Nisha Prasad", text: "Photo", time: "1h", unread: 0, color: "#d7b5d9" },
-  { initials: "VJ", name: "Vikram Jain", text: "Okay, got it 👍", time: "3h", unread: 0, color: "#f3d29e" },
-];
+function Logo(){return <div className="logo"><div className="logoMark"><MessageCircle size={20} strokeWidth={2.7}/></div><span>Nakshatra</span></div>}
+function initials(name:string){return name.split(/\s+/).map(value=>value[0]).join("").slice(0,2).toUpperCase()}
+function relative(value:string|null){if(!value)return "—";const seconds=Math.max(0,(Date.now()-new Date(value).getTime())/1000);if(seconds<60)return "now";if(seconds<3600)return `${Math.floor(seconds/60)}m`;if(seconds<86400)return `${Math.floor(seconds/3600)}h`;return new Date(value).toLocaleDateString("en-IN",{day:"numeric",month:"short"})}
 
-const campaigns = [
-  { name: "Monsoon Sale — VIP", status: "Sending", audience: "4,820", sent: "3,412", rate: "71%", date: "Today, 10:30 AM" },
-  { name: "Order feedback", status: "Scheduled", audience: "1,240", sent: "—", rate: "—", date: "Tomorrow, 9:00 AM" },
-  { name: "June product update", status: "Completed", audience: "8,590", sent: "8,516", rate: "99.1%", date: "Jun 28, 2026" },
-  { name: "Abandoned cart · 24h", status: "Completed", audience: "690", sent: "674", rate: "97.7%", date: "Jun 25, 2026" },
-];
-
-function Logo() {
-  return <div className="logo"><div className="logoMark"><MessageCircle size={20} strokeWidth={2.7}/></div><span>WaFlow</span></div>;
+function Sidebar({active,setActive,open,close,userEmail,workspaceName,logout}:{active:Section;setActive:(section:Section)=>void;open:boolean;close:()=>void;userEmail:string;workspaceName:string;logout:()=>void}){
+  return <><aside className={`sidebar ${open?"open":""}`}><div className="sideTop"><Logo/><button className="mobileClose" onClick={close} aria-label="Close navigation"><X size={20}/></button></div><nav><p className="eyebrow">WORKSPACE</p>{nav.map(({label,icon:Icon})=><button key={label} onClick={()=>{setActive(label);close()}} className={active===label?"active":""}><Icon size={18}/><span>{label}</span></button>)}</nav><div className="waStatus"><div><span className="pulse"/><b>WhatsApp connected</b></div><p>+91 94797 93778 · Live</p></div><div className="user"><div className="avatar">NH</div><div><b>{workspaceName}</b><span>{userEmail}</span></div><button className="logoutBtn" onClick={logout} aria-label="Sign out"><LogOut size={16}/></button></div></aside>{open&&<div className="backdrop" onClick={close}/>}</>
 }
 
-function Sidebar({ active, setActive, open, close, userEmail, workspaceName, logout }: { active: Section; setActive: (s: Section) => void; open: boolean; close: () => void; userEmail:string; workspaceName:string; logout:()=>void }) {
-  return <><aside className={`sidebar ${open ? "open" : ""}`}>
-    <div className="sideTop"><Logo/><button className="mobileClose" onClick={close}><X size={20}/></button></div>
-    <nav>
-      <p className="eyebrow">WORKSPACE</p>
-      {nav.map(({ label, icon: Icon, count }) => <button key={label} onClick={() => {setActive(label); close();}} className={active === label ? "active" : ""}>
-        <Icon size={18}/><span>{label}</span>{count && <b>{count}</b>}
-      </button>)}
-      <p className="eyebrow spaceTop">MANAGE</p>
-      <button><Workflow size={18}/><span>Templates</span></button>
-      <button><Users size={18}/><span>Team</span></button>
-      <button><Settings size={18}/><span>Settings</span></button>
-    </nav>
-    <div className="waStatus"><div><span className="pulse"/><b>WhatsApp connected</b></div><p>Meta Cloud API · Live</p></div>
-    <div className="user"><div className="avatar">NH</div><div><b>{workspaceName}</b><span>{userEmail}</span></div><button className="logoutBtn" onClick={logout} aria-label="Sign out"><LogOut size={16}/></button></div>
-  </aside>{open && <div className="backdrop" onClick={close}/>}</>;
+function Header({title,menu,refresh,loading}:{title:string;menu:()=>void;refresh:()=>void;loading:boolean}){
+  const today=new Intl.DateTimeFormat("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"}).format(new Date());
+  return <header><button className="menu" onClick={menu} aria-label="Open navigation"><Menu size={21}/></button><div><h1>{title}</h1><p>{today}</p></div><div className="headerActions"><button className="iconBtn" onClick={refresh} aria-label="Refresh live data">{loading?<Loader2 className="spin" size={18}/>:<RefreshCw size={18}/>}</button><span className="liveData"><i/>Live data</span></div></header>
 }
 
-function Header({ title, menu }: { title: string; menu: () => void }) {
-  return <header><button className="menu" onClick={menu}><Menu size={21}/></button><div><h1>{title}</h1><p>Thursday, 16 July 2026</p></div><div className="headerActions"><button className="iconBtn"><Search size={18}/></button><button className="iconBtn notification"><Bell size={18}/><i/></button><button className="primary"><Plus size={17}/><span>New campaign</span></button></div></header>;
+function EmptyState({icon:Icon,title,body}:{icon:typeof Inbox;title:string;body:string}){
+  return <div className="sectionEmpty"><span><Icon size={22}/></span><b>{title}</b><p>{body}</p></div>
 }
 
-function Overview({ go }: { go: (s: Section) => void }) {
-  const stats = [
-    { icon: MessageCircle, label: "Messages sent", value: "24,892", change: "+12.5%", color: "green" },
-    { icon: CheckCheck, label: "Delivered", value: "23,718", change: "95.3%", color: "blue" },
-    { icon: Activity, label: "Read rate", value: "78.4%", change: "+4.2%", color: "violet" },
-    { icon: Users, label: "Active contacts", value: "8,429", change: "+342", color: "orange" },
+function Overview({data,go,userName}:{data:WorkspaceData;go:(section:Section)=>void;userName:string}){
+  const outbound=data.messages.filter(message=>message.direction==="outbound");
+  const delivered=outbound.filter(message=>message.status==="delivered"||message.status==="read").length;
+  const read=outbound.filter(message=>message.status==="read").length;
+  const stats=[
+    {icon:MessageCircle,label:"Messages sent",value:String(outbound.length),note:"Live total",color:"green"},
+    {icon:CheckCheck,label:"Delivered",value:String(delivered),note:"Delivered or read",color:"blue"},
+    {icon:Activity,label:"Read rate",value:outbound.length?`${Math.round(read/outbound.length*100)}%`:"0%",note:"Based on live statuses",color:"violet"},
+    {icon:Users,label:"Contacts",value:String(data.contacts.length),note:"Stored in your workspace",color:"orange"},
   ];
-  return <div className="content">
-    <section className="welcome"><div><span className="hello">Good morning, Shikha <Sparkles size={16}/></span><h2>Your WhatsApp is doing great.</h2><p>Here’s what’s happening with your conversations today.</p></div><div className="period">Last 7 days <ChevronDown size={15}/></div></section>
-    <div className="stats">{stats.map(({icon: Icon, label, value, change, color}) => <article className="stat" key={label}><div className={`statIcon ${color}`}><Icon size={20}/></div><span>{label}</span><strong>{value}</strong><small className={change.startsWith("+") ? "up" : ""}><ArrowUpRight size={13}/>{change}<em> vs last week</em></small></article>)}</div>
-    <div className="gridMain">
-      <article className="panel chartPanel"><div className="panelHead"><div><h3>Message activity</h3><p>Sent and received messages</p></div><div className="legend"><span><i className="sent"/>Sent</span><span><i className="received"/>Received</span></div></div><div className="chart">
-        <div className="yaxis"><span>4k</span><span>3k</span><span>2k</span><span>1k</span><span>0</span></div>
-        <svg viewBox="0 0 700 220" preserveAspectRatio="none" aria-label="Messages activity chart"><defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#18a878" stopOpacity=".22"/><stop offset="1" stopColor="#18a878" stopOpacity="0"/></linearGradient></defs><path className="area" d="M0,168 C45,151 71,116 112,128 S176,137 221,100 S293,99 336,112 S401,41 449,55 S510,88 557,62 S627,78 700,25 L700,220 L0,220Z"/><path className="line1" d="M0,168 C45,151 71,116 112,128 S176,137 221,100 S293,99 336,112 S401,41 449,55 S510,88 557,62 S627,78 700,25"/><path className="line2" d="M0,190 C54,181 75,157 119,164 S181,171 228,148 S288,158 337,151 S404,104 451,117 S516,145 561,127 S630,139 700,92"/></svg>
-        <div className="xaxis"><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span></div>
-      </div></article>
-      <article className="panel inboxPanel"><div className="panelHead"><div><h3>Recent conversations</h3><p>Latest from your inbox</p></div><button onClick={() => go("Inbox")}>View all <ArrowUpRight size={14}/></button></div><div>{conversations.slice(0,4).map(c => <div className="conversation" key={c.name}><div className="contactAvatar" style={{background:c.color}}>{c.initials}</div><div className="contactText"><b>{c.name}</b><span>{c.text}</span></div><div className="contactMeta"><span>{c.time}</span>{c.unread > 0 && <b>{c.unread}</b>}</div></div>)}</div></article>
-    </div>
-    <div className="gridBottom">
-      <article className="panel quick"><div className="panelHead"><div><h3>Quick actions</h3><p>Jump right back in</p></div></div><div><button onClick={() => go("Campaigns")}><span className="qaIcon green"><Send size={19}/></span><div><b>Send a broadcast</b><small>Reach your audience instantly</small></div><ArrowUpRight size={16}/></button><button onClick={() => go("Flows")}><span className="qaIcon purple"><Bot size={19}/></span><div><b>Create automation</b><small>Build a no-code message flow</small></div><ArrowUpRight size={16}/></button><button onClick={() => go("Contacts")}><span className="qaIcon orange"><ContactRound size={19}/></span><div><b>Import contacts</b><small>Upload a CSV contact list</small></div><ArrowUpRight size={16}/></button></div></article>
-      <article className="panel campaignMini"><div className="panelHead"><div><h3>Active campaign</h3><p>Monsoon Sale — VIP customers</p></div><span className="live"><i/>Live</span></div><div className="campaignNumbers"><div><strong>3,412</strong><span>Sent</span></div><div><strong>3,298</strong><span>Delivered</span></div><div><strong>2,674</strong><span>Read</span></div></div><div className="progress"><i/></div><div className="campaignFooter"><span><Clock3 size={14}/>Started 2h ago</span><b>71% complete</b></div></article>
-    </div>
-  </div>;
+  const days=Array.from({length:7},(_,index)=>{const date=new Date();date.setHours(0,0,0,0);date.setDate(date.getDate()-(6-index));const sent=data.messages.filter(message=>message.direction==="outbound"&&new Date(message.sent_at).toDateString()===date.toDateString()).length;const received=data.messages.filter(message=>message.direction==="inbound"&&new Date(message.sent_at).toDateString()===date.toDateString()).length;return{label:date.toLocaleDateString("en-IN",{weekday:"short"}),sent,received}});
+  const chartMax=Math.max(1,...days.flatMap(day=>[day.sent,day.received]));
+  const lastMessage=(conversationId:string)=>data.messages.filter(message=>message.conversation_id===conversationId).at(-1);
+  return <div className="content"><section className="welcome"><div><span className="hello">Welcome, {userName}</span><h2>Your live WhatsApp workspace.</h2><p>Every number below comes from your connected Supabase records.</p></div><div className="period">Last 7 days</div></section><div className="stats">{stats.map(({icon:Icon,label,value,note,color})=><article className="stat" key={label}><div className={`statIcon ${color}`}><Icon size={20}/></div><span>{label}</span><strong>{value}</strong><small>{note}</small></article>)}</div><div className="gridMain"><article className="panel chartPanel"><div className="panelHead"><div><h3>Message activity</h3><p>Actual sent and received messages</p></div><div className="legend"><span><i className="sent"/>Sent</span><span><i className="received"/>Received</span></div></div><div className="liveChart">{days.map(day=><div className="liveChartDay" key={day.label}><div className="liveBars"><i className="sentBar" style={{height:`${Math.max(day.sent?8:0,day.sent/chartMax*100)}%`}} title={`${day.sent} sent`}/><i className="receivedBar" style={{height:`${Math.max(day.received?8:0,day.received/chartMax*100)}%`}} title={`${day.received} received`}/></div><span>{day.label}</span></div>)}</div></article><article className="panel inboxPanel"><div className="panelHead"><div><h3>Recent conversations</h3><p>Latest from your live inbox</p></div><button onClick={()=>go("Inbox")}>View all <ArrowUpRight size={14}/></button></div>{data.conversations.length?<div>{data.conversations.slice(0,4).map(conversation=>{const name=conversation.contact.display_name||conversation.contact.phone;const message=lastMessage(conversation.id);return <div className="conversation" key={conversation.id}><div className="contactAvatar liveAvatar">{initials(name)}</div><div className="contactText"><b>{name}</b><span>{message?.body||`[${message?.message_type??"conversation"}]`}</span></div><div className="contactMeta"><span>{relative(conversation.last_message_at)}</span></div></div>})}</div>:<EmptyState icon={Inbox} title="No conversations" body="New WhatsApp conversations will appear here."/>}</article></div><div className="gridBottom"><article className="panel quick"><div className="panelHead"><div><h3>Quick actions</h3><p>Open a live workspace section</p></div></div><div><button onClick={()=>go("Inbox")}><span className="qaIcon green"><Inbox size={19}/></span><div><b>Open inbox</b><small>Reply to live conversations</small></div><ArrowUpRight size={16}/></button><button onClick={()=>go("Flows")}><span className="qaIcon purple"><Workflow size={19}/></span><div><b>View flows</b><small>{data.workflows.length} saved</small></div><ArrowUpRight size={16}/></button><button onClick={()=>go("Contacts")}><span className="qaIcon orange"><ContactRound size={19}/></span><div><b>View contacts</b><small>{data.contacts.length} stored</small></div><ArrowUpRight size={16}/></button></div></article><article className="panel campaignMini"><div className="panelHead"><div><h3>Active campaign</h3><p>Bulk campaigns are not configured yet</p></div></div><EmptyState icon={Megaphone} title="No active campaign" body="Campaign totals will appear after the first approved broadcast."/></article></div></div>
 }
 
-function CampaignsView() {
-  return <div className="content"><div className="pageIntro"><div><h2>Campaigns</h2><p>Send approved templates to opted-in audiences and track delivery.</p></div><button className="primary"><Plus size={17}/>Create campaign</button></div><div className="stats campaignStats"><article><span>Total sent</span><strong>38,420</strong><small>Across 12 campaigns</small></article><article><span>Average delivery</span><strong>96.8%</strong><small className="up">+1.4% this month</small></article><article><span>Average read rate</span><strong>79.2%</strong><small>Industry avg. 74%</small></article></div><article className="panel tablePanel"><div className="panelHead"><div><h3>All campaigns</h3><p>Recent and scheduled broadcasts</p></div><div className="period">All statuses <ChevronDown size={15}/></div></div><div className="table"><div className="tr th"><span>CAMPAIGN</span><span>STATUS</span><span>AUDIENCE</span><span>SENT</span><span>DELIVERY</span><span>DATE</span></div>{campaigns.map(c=><div className="tr" key={c.name}><b>{c.name}</b><span><i className={`status ${c.status.toLowerCase()}`}/>{c.status}</span><span>{c.audience}</span><span>{c.sent}</span><span>{c.rate}</span><span>{c.date}</span></div>)}</div></article></div>;
-}
+function CampaignsView(){return <div className="content"><div className="pageIntro"><div><h2>Campaigns</h2><p>Only real approved-template broadcasts will appear here.</p></div><button className="primary" disabled title="Campaign creation is not configured yet"><Plus size={17}/>Create campaign</button></div><div className="stats campaignStats"><article><span>Total sent</span><strong>0</strong><small>No campaigns recorded</small></article><article><span>Average delivery</span><strong>0%</strong><small>No delivery data</small></article><article><span>Average read rate</span><strong>0%</strong><small>No read data</small></article></div><article className="panel tablePanel"><div className="panelHead"><div><h3>All campaigns</h3><p>Live campaign records only</p></div></div><EmptyState icon={Megaphone} title="No campaigns yet" body="Campaign creation will be enabled after templates and opt-in audiences are configured."/></article></div>}
 
-function FlowsView() {
-  const [published, setPublished] = useState(false);
-  return <div className="flowPage"><div className="flowToolbar"><div><h2>New customer welcome</h2><span><i className={published?"on":""}/>{published?"Published":"Draft saved"}</span></div><div><button className="secondary">Preview</button><button className="primary" onClick={()=>setPublished(!published)}>{published?"Unpublish":"Publish flow"}</button></div></div><div className="flowBuilder"><aside className="nodePalette"><p className="eyebrow">BUILDING BLOCKS</p><button><span className="nodeIcon trigger"><Zap/></span><div><b>Trigger</b><small>Starts your flow</small></div></button><button><span className="nodeIcon message"><MessageCircle/></span><div><b>Send message</b><small>Text or template</small></div></button><button><span className="nodeIcon condition"><GitBranch/></span><div><b>Condition</b><small>Branch by response</small></div></button><button><span className="nodeIcon wait"><Clock3/></span><div><b>Wait</b><small>Add a delay</small></div></button><p className="dragHint">Drag blocks onto the canvas</p></aside><div className="canvas"><div className="dots"/><div className="flowNode triggerNode"><span><Zap size={15}/>TRIGGER</span><b>New conversation started</b><small>When a contact sends any message</small><i/></div><div className="connector c1"/><button className="addNode n1"><Plus/></button><div className="flowNode msgNode"><span><MessageCircle size={15}/>MESSAGE</span><b>Welcome message</b><p>Hi {"{{first_name}}"}! 👋 Thanks for reaching out. How can we help?</p><i/></div><div className="connector c2"/><button className="addNode n2"><Plus/></button><div className="flowNode condNode"><span><GitBranch size={15}/>CONDITION</span><b>Customer response</b><small>Route based on button selected</small><div className="branches"><em>Sales</em><em>Support</em></div></div></div><aside className="properties"><div className="propHead"><h3>Welcome message</h3><button><X/></button></div><label>Message type<select><option>Text message</option><option>Approved template</option></select></label><label>Message<textarea defaultValue={'Hi {{first_name}}! 👋 Thanks for reaching out. How can we help you today?'}/><small>81 / 1,024 characters</small></label><label>Quick reply buttons</label><div className="reply"><span>Talk to sales</span><MoreHorizontal/></div><div className="reply"><span>Get support</span><MoreHorizontal/></div><button className="addReply"><Plus/>Add quick reply</button></aside></div></div>;
-}
+function FlowsView({flows}:{flows:WorkspaceFlow[]}){return <div className="content"><div className="pageIntro"><div><h2>Flows</h2><p>Saved automation workflows from your workspace.</p></div><button className="primary" disabled title="Flow editing is not configured yet"><Plus size={17}/>Create flow</button></div><article className="panel tablePanel"><div className="panelHead"><div><h3>{flows.length} flows</h3><p>Live workflow records only</p></div></div>{flows.length?<div className="table"><div className="tr flowRow th"><span>FLOW</span><span>TRIGGER</span><span>STATUS</span><span>UPDATED</span></div>{flows.map(flow=><div className="tr flowRow" key={flow.id}><b>{flow.name}</b><span>{flow.trigger_type}</span><span><i className={`status ${flow.is_active?"sending":""}`}/>{flow.is_active?"Active":"Draft"}</span><span>{new Date(flow.updated_at).toLocaleDateString("en-IN")}</span></div>)}</div>:<EmptyState icon={GitBranch} title="No flows yet" body="No automation workflow has been saved in Supabase."/>}</article></div>}
 
-function ContactsView() {
-  const rows = ["Aarav Mehta","Sara Khan","Rohan Patel","Nisha Prasad","Vikram Jain","Ananya Shah"];
-  return <div className="content"><div className="pageIntro"><div><h2>Contacts</h2><p>Manage opt-ins, segments, and customer information.</p></div><div><button className="secondary">Import CSV</button><button className="primary"><Plus size={17}/>Add contact</button></div></div><article className="panel tablePanel"><div className="panelHead"><div><h3>8,429 contacts</h3><p>All opted-in WhatsApp customers</p></div><div className="inboxSearch small"><Search size={16}/><input placeholder="Search contacts"/></div></div><div className="table contactsTable"><div className="tr th"><span>CONTACT</span><span>PHONE</span><span>STATUS</span><span>TAGS</span><span>LAST SEEN</span></div>{rows.map((r,i)=><div className="tr" key={r}><b><span className="tinyAvatar">{r.split(" ").map(x=>x[0]).join("")}</span>{r}</b><span>+91 98765 00{20+i}</span><span className="opted"><Check size={13}/>Opted in</span><span><em>{i%2?"Customer":"VIP"}</em></span><span>{i<2?"Today":"Jul "+(14-i)}</span></div>)}</div></article></div>;
-}
+function ContactsView({contacts}:{contacts:Contact[]}){return <div className="content"><div className="pageIntro"><div><h2>Contacts</h2><p>Contacts created from real WhatsApp conversations.</p></div></div><article className="panel tablePanel"><div className="panelHead"><div><h3>{contacts.length} contacts</h3><p>Live Supabase contact records</p></div><div className="inboxSearch small"><Search size={16}/><input placeholder="Search is available in Inbox" disabled/></div></div>{contacts.length?<div className="table contactsTable"><div className="tr th"><span>CONTACT</span><span>PHONE</span><span>CHANNEL</span><span>TAGS</span><span>LAST ACTIVITY</span></div>{contacts.map(contact=>{const name=contact.display_name||contact.phone;return <div className="tr" key={contact.id}><b><span className="tinyAvatar">{initials(name)}</span>{name}</b><span>+{contact.phone}</span><span className="opted"><MessageCircle size={13}/>WhatsApp</span><span>{contact.tags.length?contact.tags.map(tag=><em key={tag}>{tag}</em>):"—"}</span><span>{relative(contact.updated_at)}</span></div>})}</div>:<EmptyState icon={ContactRound} title="No contacts yet" body="Contacts are created automatically when someone messages your WhatsApp sender."/>}</article></div>}
 
-export function Dashboard({userEmail,workspaceName}:{userEmail:string;workspaceName:string}) {
-  const [active, setActive] = useState<Section>("Inbox");
-  const [menuOpen, setMenuOpen] = useState(false);
+export function Dashboard({userEmail,userName,workspaceName}:{userEmail:string;userName:string;workspaceName:string}){
+  const [active,setActive]=useState<Section>("Overview");
+  const [menuOpen,setMenuOpen]=useState(false);
+  const [data,setData]=useState<WorkspaceData>(emptyData);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState("");
+  const load=useCallback(async()=>{setLoading(true);setError("");try{const supabase=createClient();const {data:sessionData}=await supabase.auth.getSession();const token=sessionData.session?.access_token;if(!token)throw new Error("Your session expired. Please sign in again.");const response=await fetch("/api/inbox",{headers:{Authorization:`Bearer ${token}`},cache:"no-store"});const result=await response.json();if(!response.ok)throw new Error(result.error??"Could not load workspace data");setData({conversations:result.conversations??[],messages:result.messages??[],contacts:result.contacts??[],workflows:result.workflows??[]})}catch(cause){setError(cause instanceof Error?cause.message:"Could not load workspace data")}finally{setLoading(false)}},[]);
+  useEffect(()=>{queueMicrotask(load);const supabase=createClient();const channel=supabase.channel("dashboard-live-data").on("postgres_changes",{event:"*",schema:"public",table:"messages"},()=>load()).on("postgres_changes",{event:"*",schema:"public",table:"conversations"},()=>load()).subscribe();return()=>{void supabase.removeChannel(channel)}},[load]);
   async function logout(){await createClient().auth.signOut();window.location.assign("/login")}
-  const body = useMemo(()=> active === "Overview" ? <Overview go={setActive}/> : active === "Inbox" ? <LiveInbox/> : active === "Campaigns" ? <CampaignsView/> : active === "Flows" ? <FlowsView/> : <ContactsView/>, [active]);
-  return <div className="app"><Sidebar active={active} setActive={setActive} open={menuOpen} close={()=>setMenuOpen(false)} userEmail={userEmail} workspaceName={workspaceName} logout={logout}/><main className="main"><Header title={active} menu={()=>setMenuOpen(true)}/>{body}<footer><span><CircleHelp size={14}/>Live workspace · Protected by Supabase Auth</span><span>Official WhatsApp Cloud API</span></footer></main></div>;
+  const body=active==="Overview"?<Overview data={data} go={setActive} userName={userName}/>:active==="Inbox"?<LiveInbox/>:active==="Campaigns"?<CampaignsView/>:active==="Flows"?<FlowsView flows={data.workflows}/>:<ContactsView contacts={data.contacts}/>;
+  return <div className="app"><Sidebar active={active} setActive={setActive} open={menuOpen} close={()=>setMenuOpen(false)} userEmail={userEmail} workspaceName={workspaceName} logout={logout}/><main className="main"><Header title={active} menu={()=>setMenuOpen(true)} refresh={load} loading={loading}/>{error&&<div className="workspaceError">{error}</div>}{body}<footer><span><CircleHelp size={14}/>Live workspace · Protected by Supabase Auth</span><span>Official WhatsApp Cloud API</span></footer></main></div>
 }
