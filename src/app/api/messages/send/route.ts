@@ -39,6 +39,28 @@ export async function POST(request: Request) {
     .maybeSingle();
   if (!membership) return Response.json({ error: "Forbidden" }, { status: 403 });
 
+  const { data: conversation } = await supabase
+    .from("conversations")
+    .select("id, whatsapp_account_id, contact:contacts(wa_id)")
+    .eq("id", conversationId)
+    .eq("organization_id", account.organization_id)
+    .eq("whatsapp_account_id", whatsappAccountId)
+    .maybeSingle();
+  const contact = conversation?.contact as unknown as { wa_id?: string } | null;
+  if (!conversation || contact?.wa_id !== to) return Response.json({ error: "Conversation recipient does not match" }, { status: 403 });
+
+  const { data: latestInbound } = await supabase
+    .from("messages")
+    .select("sent_at")
+    .eq("conversation_id", conversationId)
+    .eq("direction", "inbound")
+    .order("sent_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!latestInbound || Date.now() - new Date(latestInbound.sent_at).getTime() > 24 * 60 * 60 * 1000) {
+    return Response.json({ error: "The 24-hour service window is closed. Send an approved template instead." }, { status: 409 });
+  }
+
   const metaToken = process.env.WHATSAPP_ACCESS_TOKEN;
   if (!metaToken) return Response.json({ error: "WhatsApp is not configured" }, { status: 503 });
 

@@ -5,8 +5,10 @@ import {
   Activity, ArrowUpRight, Bell, Bot, Check, CheckCheck, ChevronDown,
   CircleHelp, Clock3, ContactRound, GitBranch, Inbox, LayoutDashboard,
   Megaphone, Menu, MessageCircle, MoreHorizontal, Plus, Search, Send,
-  Settings, Sparkles, Users, Workflow, X, Zap,
+  Settings, Sparkles, Users, Workflow, X, Zap, LogOut,
 } from "lucide-react";
+import { LiveInbox } from "@/components/live-inbox";
+import { createClient } from "@/lib/supabase/client";
 
 type Section = "Overview" | "Inbox" | "Campaigns" | "Flows" | "Contacts";
 
@@ -37,7 +39,7 @@ function Logo() {
   return <div className="logo"><div className="logoMark"><MessageCircle size={20} strokeWidth={2.7}/></div><span>WaFlow</span></div>;
 }
 
-function Sidebar({ active, setActive, open, close }: { active: Section; setActive: (s: Section) => void; open: boolean; close: () => void }) {
+function Sidebar({ active, setActive, open, close, userEmail, workspaceName, logout }: { active: Section; setActive: (s: Section) => void; open: boolean; close: () => void; userEmail:string; workspaceName:string; logout:()=>void }) {
   return <><aside className={`sidebar ${open ? "open" : ""}`}>
     <div className="sideTop"><Logo/><button className="mobileClose" onClick={close}><X size={20}/></button></div>
     <nav>
@@ -50,8 +52,8 @@ function Sidebar({ active, setActive, open, close }: { active: Section; setActiv
       <button><Users size={18}/><span>Team</span></button>
       <button><Settings size={18}/><span>Settings</span></button>
     </nav>
-    <div className="waStatus"><div><span className="pulse"/><b>WhatsApp connected</b></div><p>+91 98765 43210</p></div>
-    <div className="user"><div className="avatar">SM</div><div><b>Shikha Mehta</b><span>Administrator</span></div><MoreHorizontal size={18}/></div>
+    <div className="waStatus"><div><span className="pulse"/><b>WhatsApp connected</b></div><p>Meta Cloud API · Live</p></div>
+    <div className="user"><div className="avatar">NH</div><div><b>{workspaceName}</b><span>{userEmail}</span></div><button className="logoutBtn" onClick={logout} aria-label="Sign out"><LogOut size={16}/></button></div>
   </aside>{open && <div className="backdrop" onClick={close}/>}</>;
 }
 
@@ -84,14 +86,6 @@ function Overview({ go }: { go: (s: Section) => void }) {
   </div>;
 }
 
-function InboxView() {
-  const [selected, setSelected] = useState(conversations[0]);
-  const [draft, setDraft] = useState("");
-  const [messages, setMessages] = useState(["Hi Aarav! Your booking request is ready.", "Yes, please confirm my booking"]);
-  function send(){ if(!draft.trim()) return; setMessages([...messages, draft]); setDraft(""); }
-  return <div className="inboxView panel"><div className="conversationList"><div className="inboxSearch"><Search size={17}/><input placeholder="Search conversations"/></div>{conversations.map(c=><button className={selected.name===c.name?"selected":""} key={c.name} onClick={()=>setSelected(c)}><div className="contactAvatar" style={{background:c.color}}>{c.initials}</div><div className="contactText"><b>{c.name}</b><span>{c.text}</span></div><div className="contactMeta"><span>{c.time}</span>{c.unread>0&&<b>{c.unread}</b>}</div></button>)}</div><div className="chat"><div className="chatHead"><div className="contactAvatar" style={{background:selected.color}}>{selected.initials}</div><div><b>{selected.name}</b><span><i/>online</span></div><MoreHorizontal/></div><div className="chatBody"><div className="day">TODAY</div>{messages.map((m,i)=><div key={i} className={`bubble ${i%2===0?"out":"in"}`}>{m}<small>{i%2===0?"10:42 AM":"10:44 AM"}{i%2===0&&<CheckCheck size={13}/>}</small></div>)}</div><div className="composer"><button><Plus/></button><input value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()} placeholder="Write a message..."/><button className="sendBtn" onClick={send}><Send size={18}/></button></div></div><aside className="details"><div className="bigAvatar" style={{background:selected.color}}>{selected.initials}</div><h3>{selected.name}</h3><p>+91 98765 00021</p><hr/><span>ASSIGNED TO</span><b>Shikha Mehta</b><span>TAGS</span><div><em>VIP</em><em>Booking</em></div><span>LAST ACTIVITY</span><b>2 minutes ago</b></aside></div>;
-}
-
 function CampaignsView() {
   return <div className="content"><div className="pageIntro"><div><h2>Campaigns</h2><p>Send approved templates to opted-in audiences and track delivery.</p></div><button className="primary"><Plus size={17}/>Create campaign</button></div><div className="stats campaignStats"><article><span>Total sent</span><strong>38,420</strong><small>Across 12 campaigns</small></article><article><span>Average delivery</span><strong>96.8%</strong><small className="up">+1.4% this month</small></article><article><span>Average read rate</span><strong>79.2%</strong><small>Industry avg. 74%</small></article></div><article className="panel tablePanel"><div className="panelHead"><div><h3>All campaigns</h3><p>Recent and scheduled broadcasts</p></div><div className="period">All statuses <ChevronDown size={15}/></div></div><div className="table"><div className="tr th"><span>CAMPAIGN</span><span>STATUS</span><span>AUDIENCE</span><span>SENT</span><span>DELIVERY</span><span>DATE</span></div>{campaigns.map(c=><div className="tr" key={c.name}><b>{c.name}</b><span><i className={`status ${c.status.toLowerCase()}`}/>{c.status}</span><span>{c.audience}</span><span>{c.sent}</span><span>{c.rate}</span><span>{c.date}</span></div>)}</div></article></div>;
 }
@@ -106,9 +100,10 @@ function ContactsView() {
   return <div className="content"><div className="pageIntro"><div><h2>Contacts</h2><p>Manage opt-ins, segments, and customer information.</p></div><div><button className="secondary">Import CSV</button><button className="primary"><Plus size={17}/>Add contact</button></div></div><article className="panel tablePanel"><div className="panelHead"><div><h3>8,429 contacts</h3><p>All opted-in WhatsApp customers</p></div><div className="inboxSearch small"><Search size={16}/><input placeholder="Search contacts"/></div></div><div className="table contactsTable"><div className="tr th"><span>CONTACT</span><span>PHONE</span><span>STATUS</span><span>TAGS</span><span>LAST SEEN</span></div>{rows.map((r,i)=><div className="tr" key={r}><b><span className="tinyAvatar">{r.split(" ").map(x=>x[0]).join("")}</span>{r}</b><span>+91 98765 00{20+i}</span><span className="opted"><Check size={13}/>Opted in</span><span><em>{i%2?"Customer":"VIP"}</em></span><span>{i<2?"Today":"Jul "+(14-i)}</span></div>)}</div></article></div>;
 }
 
-export function Dashboard() {
-  const [active, setActive] = useState<Section>("Overview");
+export function Dashboard({userEmail,workspaceName}:{userEmail:string;workspaceName:string}) {
+  const [active, setActive] = useState<Section>("Inbox");
   const [menuOpen, setMenuOpen] = useState(false);
-  const body = useMemo(()=> active === "Overview" ? <Overview go={setActive}/> : active === "Inbox" ? <InboxView/> : active === "Campaigns" ? <CampaignsView/> : active === "Flows" ? <FlowsView/> : <ContactsView/>, [active]);
-  return <div className="app"><Sidebar active={active} setActive={setActive} open={menuOpen} close={()=>setMenuOpen(false)}/><main className="main"><Header title={active} menu={()=>setMenuOpen(true)}/>{body}<footer><span><CircleHelp size={14}/>Demo workspace · Connect Meta and Supabase to go live</span><span>Official WhatsApp Cloud API</span></footer></main></div>;
+  async function logout(){await createClient().auth.signOut();window.location.assign("/login")}
+  const body = useMemo(()=> active === "Overview" ? <Overview go={setActive}/> : active === "Inbox" ? <LiveInbox/> : active === "Campaigns" ? <CampaignsView/> : active === "Flows" ? <FlowsView/> : <ContactsView/>, [active]);
+  return <div className="app"><Sidebar active={active} setActive={setActive} open={menuOpen} close={()=>setMenuOpen(false)} userEmail={userEmail} workspaceName={workspaceName} logout={logout}/><main className="main"><Header title={active} menu={()=>setMenuOpen(true)}/>{body}<footer><span><CircleHelp size={14}/>Live workspace · Protected by Supabase Auth</span><span>Official WhatsApp Cloud API</span></footer></main></div>;
 }
