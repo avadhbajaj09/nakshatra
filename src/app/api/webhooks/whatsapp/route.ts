@@ -1,16 +1,9 @@
 import { NextRequest } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { verifyMetaSignature } from "@/lib/meta";
+import { getIncomingBody, handleWelcomeFlow, type InboundFlowMessage } from "@/lib/whatsapp-flow";
 
 export const runtime = "nodejs";
-
-type WhatsAppMessage = {
-  id: string;
-  from: string;
-  timestamp: string;
-  type: string;
-  text?: { body?: string };
-};
 
 export async function GET(request: NextRequest) {
   const mode = request.nextUrl.searchParams.get("hub.mode");
@@ -57,7 +50,7 @@ export async function POST(request: NextRequest) {
 
         if (!account) continue;
 
-        for (const incoming of (value.messages || []) as WhatsAppMessage[]) {
+        for (const incoming of (value.messages || []) as InboundFlowMessage[]) {
           const contactName = value.contacts?.find((item: { wa_id?: string }) => item.wa_id === incoming.from)?.profile?.name;
           const { data: contact } = await supabase
             .from("contacts")
@@ -67,6 +60,7 @@ export async function POST(request: NextRequest) {
                 wa_id: incoming.from,
                 phone: incoming.from,
                 display_name: contactName || incoming.from,
+                updated_at: new Date().toISOString(),
               },
               { onConflict: "organization_id,wa_id" },
             )
@@ -84,6 +78,7 @@ export async function POST(request: NextRequest) {
                 contact_id: contact.id,
                 status: "open",
                 last_message_at: new Date(Number(incoming.timestamp) * 1000).toISOString(),
+                updated_at: new Date().toISOString(),
               },
               { onConflict: "whatsapp_account_id,contact_id" },
             )
@@ -92,20 +87,31 @@ export async function POST(request: NextRequest) {
 
           if (!conversation) continue;
 
-          await supabase.from("messages").upsert(
+          const { data: storedMessage } = await supabase.from("messages").upsert(
             {
               organization_id: account.organization_id,
               conversation_id: conversation.id,
               whatsapp_message_id: incoming.id,
               direction: "inbound",
               message_type: incoming.type,
-              body: incoming.text?.body || null,
+              body: getIncomingBody(incoming),
               status: "received",
               raw_payload: incoming,
               sent_at: new Date(Number(incoming.timestamp) * 1000).toISOString(),
             },
-            { onConflict: "whatsapp_message_id" },
-          );
+            { onConflict: "whatsapp_message_id", ignoreDuplicates: true },
+          ).select("id").maybeSingle();
+
+          if (storedMessage) {
+            await handleWelcomeFlow({
+              supabase,
+              accountId: account.id,
+              organizationId: account.organization_id,
+              conversationId: conversation.id,
+              phoneNumberId,
+              incoming,
+            });
+          }
         }
 
         for (const status of value.statuses || []) {
