@@ -109,6 +109,7 @@ export async function POST(request: NextRequest) {
               organizationId: account.organization_id,
               conversationId: conversation.id,
               phoneNumberId,
+              mediaBaseUrl: process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin,
               incoming,
             });
           }

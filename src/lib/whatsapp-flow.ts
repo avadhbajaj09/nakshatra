@@ -20,6 +20,7 @@ type FlowContext = {
   organizationId: string;
   conversationId: string;
   phoneNumberId: string;
+  mediaBaseUrl: string;
   incoming: InboundFlowMessage;
 };
 
@@ -29,6 +30,14 @@ const followUps: Record<string, string> = {
   luxury_resort: "Let us help plan your luxury resort stay. Please share your preferred dates, number of guests, and any special requirements.",
   events_celebrations: "We would love to plan your celebration. Please tell us the event type, preferred date, estimated guest count, and any special ideas you have.",
   something_else: "Of course! Please write a short message explaining how we can help, and our team will respond shortly.",
+};
+
+const flowImages: Record<string, string> = {
+  hotel_booking: "/whatsapp-flow/hotel-booking.jpg",
+  restaurant_booking: "/whatsapp-flow/restaurant-booking.jpg",
+  luxury_resort: "/whatsapp-flow/luxury-resort.jpg",
+  events_celebrations: "/whatsapp-flow/events-celebrations.jpg",
+  something_else: "/whatsapp-flow/something-else.jpg",
 };
 
 export function getIncomingBody(incoming: InboundFlowMessage) {
@@ -43,13 +52,17 @@ export async function handleWelcomeFlow(context: FlowContext) {
     ?? context.incoming.interactive?.button_reply?.id;
 
   if (selectedId && followUps[selectedId]) {
+    const caption = followUps[selectedId];
     await sendAndStore(context, {
       messaging_product: "whatsapp",
       recipient_type: "individual",
       to: context.incoming.from,
-      type: "text",
-      text: { body: followUps[selectedId] },
-    }, followUps[selectedId], "text");
+      type: "image",
+      image: {
+        link: getMediaUrl(context.mediaBaseUrl, flowImages[selectedId]),
+        caption,
+      },
+    }, caption, "image");
 
     await context.supabase
       .from("workflow_runs")
@@ -85,6 +98,17 @@ export async function handleWelcomeFlow(context: FlowContext) {
   if (existingRun) return;
 
   const welcomeBody = "Welcome to Nakshatra Hotel & Resort! How may we assist you today?";
+  const welcomeImageId = await sendAndStore(context, {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: context.incoming.from,
+    type: "image",
+    image: {
+      link: getMediaUrl(context.mediaBaseUrl, "/whatsapp-flow/welcome.jpg"),
+      caption: "Welcome to Nakshatra Hotel & Resort",
+    },
+  }, "Welcome to Nakshatra Hotel & Resort", "image");
+
   const messageId = await sendAndStore(context, {
     messaging_product: "whatsapp",
     recipient_type: "individual",
@@ -117,9 +141,16 @@ export async function handleWelcomeFlow(context: FlowContext) {
     conversation_id: context.conversationId,
     status: "running",
     current_step: 1,
-    context: { welcome_message_id: messageId },
+    context: {
+      welcome_image_message_id: welcomeImageId,
+      welcome_menu_message_id: messageId,
+    },
     started_at: new Date().toISOString(),
   });
+}
+
+function getMediaUrl(baseUrl: string, path: string) {
+  return `${baseUrl.replace(/\/$/, "")}${path}`;
 }
 
 async function sendAndStore(
