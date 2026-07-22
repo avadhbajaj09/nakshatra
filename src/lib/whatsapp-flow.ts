@@ -40,6 +40,20 @@ const flowImages: Record<string, string> = {
   something_else: "/whatsapp-flow/something-else.jpg",
 };
 
+const confirmations: Record<string, string> = {
+  hotel_booking: "Thank you! We have received your hotel booking enquiry. Our reservations team will check availability and reply here shortly.",
+  restaurant_booking: "Thank you! We have received your table reservation request. Our restaurant team will confirm it here shortly.",
+  luxury_resort: "Thank you! We have received your luxury resort stay enquiry. Our reservations team will prepare the best available options and reply here shortly.",
+  events_celebrations: "Thank you! We have received your event enquiry. Our events team will review the details and contact you here shortly.",
+  something_else: "Thank you! We have received your message. A member of our guest services team will reply here shortly.",
+};
+
+type WorkflowContext = {
+  selected_option?: string;
+  enquiry_details?: string;
+  [key: string]: unknown;
+};
+
 export function getIncomingBody(incoming: InboundFlowMessage) {
   return incoming.text?.body
     ?? incoming.interactive?.list_reply?.title
@@ -51,9 +65,60 @@ export async function handleWelcomeFlow(context: FlowContext) {
   const selectedId = context.incoming.interactive?.list_reply?.id
     ?? context.incoming.interactive?.button_reply?.id;
 
-  if (selectedId && followUps[selectedId]) {
+  const { data: latestRun } = await context.supabase
+    .from("workflow_runs")
+    .select("id, status, current_step, context")
+    .eq("conversation_id", context.conversationId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const runContext = toWorkflowContext(latestRun?.context);
+  const incomingBody = getIncomingBody(context.incoming)?.trim();
+
+  if (
+    latestRun
+    && latestRun.current_step === 2
+    && runContext.selected_option
+    && !runContext.enquiry_details
+    && incomingBody
+    && !selectedId
+  ) {
+    const option = runContext.selected_option;
+    const caption = confirmations[option];
+    const imagePath = flowImages[option];
+    if (!caption || !imagePath) return;
+
+    const confirmationMessageId = await sendAndStore(context, {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: context.incoming.from,
+      type: "image",
+      image: {
+        link: getMediaUrl(context.mediaBaseUrl, imagePath),
+        caption: `${caption}\n\nDetails: ${truncate(incomingBody, 600)}`,
+      },
+    }, `${caption} Details: ${incomingBody}`, "image");
+
+    await context.supabase
+      .from("workflow_runs")
+      .update({
+        status: "completed",
+        current_step: 3,
+        context: {
+          ...runContext,
+          enquiry_details: incomingBody,
+          confirmation_message_id: confirmationMessageId,
+          captured_at: new Date().toISOString(),
+        },
+        finished_at: new Date().toISOString(),
+      })
+      .eq("id", latestRun.id);
+    return;
+  }
+
+  if (selectedId && followUps[selectedId] && latestRun?.current_step === 1) {
     const caption = followUps[selectedId];
-    await sendAndStore(context, {
+    const detailsPromptMessageId = await sendAndStore(context, {
       messaging_product: "whatsapp",
       recipient_type: "individual",
       to: context.incoming.from,
@@ -67,13 +132,16 @@ export async function handleWelcomeFlow(context: FlowContext) {
     await context.supabase
       .from("workflow_runs")
       .update({
-        status: "completed",
+        status: "running",
         current_step: 2,
-        context: { selected_option: selectedId },
-        finished_at: new Date().toISOString(),
+        context: {
+          ...runContext,
+          selected_option: selectedId,
+          details_prompt_message_id: detailsPromptMessageId,
+        },
+        finished_at: null,
       })
-      .eq("conversation_id", context.conversationId)
-      .eq("status", "running");
+      .eq("id", latestRun.id);
     return;
   }
 
@@ -151,6 +219,16 @@ export async function handleWelcomeFlow(context: FlowContext) {
 
 function getMediaUrl(baseUrl: string, path: string) {
   return `${baseUrl.replace(/\/$/, "")}${path}`;
+}
+
+function toWorkflowContext(value: unknown): WorkflowContext {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as WorkflowContext
+    : {};
+}
+
+function truncate(value: string, maxLength: number) {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`;
 }
 
 async function sendAndStore(
